@@ -225,7 +225,7 @@
                         cnt_w <= cnt_w + 1;
                     end
                 end
-                COMP: begin
+                COMP:  begin
                     if((|hit) && write_buf) begin
                         state <= HIT;
                         write_set <= hit;
