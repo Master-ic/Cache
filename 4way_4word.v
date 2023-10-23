@@ -113,16 +113,16 @@
          .entry(addr[cache_entry-1:0]),     //要访问的缓存条目（索引）//读地址
          .o_tag(addr[22:cache_entry]),      //地址的标签部分     
          .writedata(writedata),             //要写入缓存的数据
-         .byte_en(byte_en),
-         .write(write0),
-         .word_en(word_en), // 4word r/w change 
-         .readdata(readdata0),
-         .wb_addr(wb_addr0),
+         .byte_en(byte_en),                 //用于指定要写入/读取的字的哪些字节
+         .write(write0),                    //写使能
+         .word_en(word_en), // 4word r/w change  指定要写入/读取的缓存行的哪个字
+         .readdata(readdata0),              //从缓存中读取的数据
+         .wb_addr(wb_addr0),                //写回操作的地址
          .hit(hit[0]),
          .modify(modify[0]),
          .miss(miss[0]),
          .valid(valid[0]),
-         .read_miss(read_buf));
+         .read_miss(read_buf));             //指示读操作上的缓存未命中的信号
 
     set #(.cache_entry(cache_entry))
     set1(.clk(clk),
@@ -231,46 +231,54 @@
                         write_set <= hit;
                         cnt_hit_w <= cnt_hit_w + 1;
                         //如果 hit_num 与 r_cm_data 的最低2位（即第0 set）匹配，则将 r_cm_data[1:0]（表示最近访问的set）放在最前面，后面跟随其余的位
-                        w_cm_data <= (r_cm_data[1:0] == hit_num) ? {r_cm_data[1:0], r_cm_data[7:2]} :
+                        w_cm_data <= (r_cm_data[1:0] == hit_num) ? {r_cm_data[1:0], r_cm_data[7:2]} : //hit_num 等于 r_cm_data 的最低两位第0 set
                                      (r_cm_data[3:2] == hit_num) ? {r_cm_data[3:2], r_cm_data[7:4], r_cm_data[1:0]} :
                                      (r_cm_data[5:4] == hit_num) ? {r_cm_data[5:4], r_cm_data[7:6], r_cm_data[3:0]} : r_cm_data;
                     //      最近被访问的set总是放在 w_cm_data 的最前面，而最不常访问的set则放在最后，
                     // 从而实现了一种简化的LRU策略。这是一种常见的方法，用于在组相联缓存中确定哪个set应该被替换。
                         w_cm <= 1;
-                    end else if((|hit) && read_buf) begin
-                        case(write_addr_buf[1:0])
+                    end else if((|hit) && read_buf) begin//缓存命中且有读取请求
+                        case(write_addr_buf[1:0])//地址线的最低两位可以用来选择缓存行中的一个32位数据字 128位的缓存行，它包含了四个32位的数据字
+                        /*  第一个数据字的地址最低两位是 00
+                            第二个数据字的地址最低两位是 01
+                            第三个数据字的地址最低两位是 10
+                            第四个数据字的地址最低两位是 11  */
                             2'b00: o_p_readdata <= (hit[0]) ? readdata0[31:0] : (hit[1]) ? readdata1[31:0] : (hit[2]) ? readdata2[31:0] : readdata3[31:0];
                             2'b01: o_p_readdata <= (hit[0]) ? readdata0[63:32] : (hit[1]) ? readdata1[63:32] : (hit[2]) ? readdata2[63:32] : readdata3[63:32];
                             2'b10: o_p_readdata <= (hit[0]) ? readdata0[95:64] : (hit[1]) ? readdata1[95:64] : (hit[2]) ? readdata2[95:64] : readdata3[95:64];
                             2'b11: o_p_readdata <= (hit[0]) ? readdata0[127:96] : (hit[1]) ? readdata1[127:96] : (hit[2]) ? readdata2[127:96] : readdata3[127:96];
                         endcase
-                        o_p_readdata_valid <= 1;
+                        o_p_readdata_valid <= 1;    //输出数据有效
                         w_cm_data <= (r_cm_data[1:0] == hit_num) ? {r_cm_data[1:0], r_cm_data[7:2]} :
                                      (r_cm_data[3:2] == hit_num) ? {r_cm_data[3:2], r_cm_data[7:4], r_cm_data[1:0]} :
                                      (r_cm_data[5:4] == hit_num) ? {r_cm_data[5:4], r_cm_data[7:6], r_cm_data[3:0]} : r_cm_data;
                         w_cm <= 1;
                         cnt_hit_r <= cnt_hit_r + 1;
                         state <= IDLE;
-                    end else if(!(&valid) || miss[r_cm_data[1:0]]) begin
-                        state <= FETCH1;
+                    end else if(!(&valid) || miss[r_cm_data[1:0]]) begin//至少有一个缓存无效 或者 缓存未命中
+                        state <= FETCH1;    //系统从主存中获取数据
                         if(!valid[0]) begin
-                            fetch_write <= 4'b0001;
-                            w_cm_data <= 8'b11100100;
+                            fetch_write <= 4'b0001;//写入第一个set
+                        /*    第一个set（00）最近被访问  第0个缓存行
+                            第二个set（01）是第二近被访问的
+                            第三个set（10）是第三近被访问的
+                            第四个set（11）是最久未被访问的     */
+                            w_cm_data <= 8'b11_10_01_00;
                             w_cm <= 1;
                         end else if(!valid[1]) begin
-                            fetch_write <= 4'b0010;
+                            fetch_write <= 4'b0010;//写入第二个set
                             w_cm_data <= (r_cm_data[1:0] == 2'b01) ? {r_cm_data[1:0], r_cm_data[7:2]} :
                                          (r_cm_data[3:2] == 2'b01) ? {r_cm_data[3:2], r_cm_data[7:4], r_cm_data[1:0]} :
                                          (r_cm_data[5:4] == 2'b01) ? {r_cm_data[5:4], r_cm_data[7:6], r_cm_data[3:0]} : r_cm_data;
                             w_cm <= 1;
                         end else if(!valid[2]) begin
-                            fetch_write <= 4'b0100;
+                            fetch_write <= 4'b0100;//写入第3个set
                             w_cm_data <= (r_cm_data[1:0] == 2'b10) ? {r_cm_data[1:0], r_cm_data[7:2]} :
                                          (r_cm_data[3:2] == 2'b10) ? {r_cm_data[3:2], r_cm_data[7:4], r_cm_data[1:0]} :
                                          (r_cm_data[5:4] == 2'b10) ? {r_cm_data[5:4], r_cm_data[7:6], r_cm_data[3:0]} : r_cm_data;
                             w_cm <= 1;
                         end else if(!valid[3]) begin
-                            fetch_write <= 4'b1000;
+                            fetch_write <= 4'b1000;//写入第4个set
                             w_cm_data <= (r_cm_data[1:0] == 2'b11) ? {r_cm_data[1:0], r_cm_data[7:2]} :
                                          (r_cm_data[3:2] == 2'b11) ? {r_cm_data[3:2], r_cm_data[7:4], r_cm_data[1:0]} :
                                          (r_cm_data[5:4] == 2'b11) ? {r_cm_data[5:4], r_cm_data[7:6], r_cm_data[3:0]} : r_cm_data;
@@ -287,14 +295,14 @@
                         o_m_read <= 1;
                     end else begin
                         state <= WB1;
-                        if(r_cm_data[1:0] == 2'b00) fetch_write <= 4'b0001;
+                        if(r_cm_data[1:0] == 2'b00) fetch_write <= 4'b0001;         //选择set0行进行替换
                         else if(r_cm_data[1:0] == 2'b01) fetch_write <= 4'b0010;
                         else if(r_cm_data[1:0] == 2'b10) fetch_write <= 4'b0100;
                         else if(r_cm_data[1:0] == 2'b11) fetch_write <= 4'b1000;
-                        w_cm_data <= {r_cm_data[1:0], r_cm_data[7:2]};
+                        w_cm_data <= {r_cm_data[1:0], r_cm_data[7:2]}; //更新缓存管理数据，将最近访问的缓存行编号置于最高位，其余的缓存行编号依次后移。
                         w_cm <= 1;
-                        if(read_buf) cnt_wb_r <= cnt_wb_r + 1;
-                        else if(write_buf) cnt_wb_w <= cnt_wb_w + 1;
+                        if(read_buf) cnt_wb_r <= cnt_wb_r + 1; //set 里面的read miss
+                        else if(write_buf) cnt_wb_w <= cnt_wb_w + 1; //是否要写入缓存
                     end
                 end
                 HIT: begin
@@ -304,20 +312,20 @@
                 end //1/13
                 FETCH1: begin
                     w_cm <= 0;
-                    if(!i_m_waitrequest) begin
-                        o_m_read <= 0;
+                    if(!i_m_waitrequest) begin  //主内存或下一级缓存告诉缓存不需要等待
+                        o_m_read <= 0;          //告诉主内存或下一级缓存缓存不读
                         state <= FETCH2;
                     end
                 end
                 FETCH2: begin
-                    if(i_m_readdata_valid) begin
+                    if(i_m_readdata_valid) begin      //指示 i_m_readdata 中的数据是有效的
                         fetch_write <= 0;            //add 3/9
-                        if(write_buf) begin
+                        if(write_buf) begin          //如果要写入缓存
                             state <= FETCH3;
-                            write_set <= fetch_write;
-		                end else if(read_buf) begin
+                            write_set <= fetch_write;   //要被写入的set
+		                end else if(read_buf) begin     //是否要读取缓存
                             state <= IDLE;
-		                    o_p_readdata_valid <= 1;
+		                    o_p_readdata_valid <= 1;    // o_p_readdata 中的数据是有效的
 		                    case(write_addr_buf[1:0])
 		                        2'b00: o_p_readdata <= i_m_readdata[ 31: 0];
 		                        2'b01: o_p_readdata <= i_m_readdata[ 63:32];
@@ -333,6 +341,7 @@
                 end
                 WB1: begin
                     w_cm <= 0;
+                    ////缓存发送到主内存或下一级缓存的地址
                     o_m_addr <= (fetch_write[0]) ? {wb_addr0, 3'b000} :
                                 (fetch_write[1]) ? {wb_addr1, 3'b000} :
                                 (fetch_write[2]) ? {wb_addr2, 3'b000} : {wb_addr3, 3'b000};
@@ -348,6 +357,7 @@
                         o_m_addr <= {write_addr_buf[24:2], 3'b000};
                         o_m_read <= 1;
                         state <= FETCH1;
+                        /*并在写回完成后转移到 FETCH1 阶段，以继续处理其他操作。这个过程确保了数据的一致性和可靠性，同时满足了缓存的一致性维护要求*/
                     end
                 end
             endcase // case (state)
