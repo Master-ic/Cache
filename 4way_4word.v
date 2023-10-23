@@ -110,9 +110,9 @@
     set #(.cache_entry(cache_entry))
     set0(.clk(clk),
          .rst(rst),
-         .entry(addr[cache_entry-1:0]),
-         .o_tag(addr[22:cache_entry]),
-         .writedata(writedata),
+         .entry(addr[cache_entry-1:0]),     //要访问的缓存条目（索引）//读地址
+         .o_tag(addr[22:cache_entry]),      //地址的标签部分     
+         .writedata(writedata),             //要写入缓存的数据
          .byte_en(byte_en),
          .write(write0),
          .word_en(word_en), // 4word r/w change 
